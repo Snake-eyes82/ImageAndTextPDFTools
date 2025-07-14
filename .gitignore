@@ -8,7 +8,10 @@ __pycache__/
 
 # IDE-specific files (e.g., VS Code)
 .vscode/
+build
 
 # Operating System files
 .DS_Store
 Thumbs.db
+
+ImageAndTextPDFTools.spec
