@@ -5,6 +5,7 @@ from PIL import Image # For image processing in OCR part
 from PyPDF2 import PdfReader, PdfMerger # For PDF operations
 from fpdf import FPDF # For creating PDFs from text
 import pytesseract # For OCR
+import pandas as pd
 
 # --- Configuration ---
 # Ensure Tesseract is installed and its path is set if not in PATH
@@ -329,6 +330,221 @@ class TextFileToPdfPage(BasePage):
         finally:
             self.convert_button.config(state=tk.NORMAL)
             self.select_button.config(state=tk.NORMAL)
+            
+# --- Page 4: PDF to Excel/CSV Converter (New) ---
+class PdfToExcelCsvPage(BasePage):
+    def __init__(self, parent, controller):
+        super().__init__(parent, controller)
+        self.pdf_path = None
+
+        tk.Label(self, text="PDF to Excel/CSV", font=("Inter", 20, "bold"), bg="#f3f4f6", fg="#1f2937").pack(pady=(10, 10))
+        tk.Label(self, text="Extract text from PDF and save as Excel (.xlsx) or CSV (.csv).", font=("Inter", 10), bg="#f3f4f6", fg="#4b5563").pack(pady=(0, 15))
+
+        self.select_button = tk.Button(self, text="Select PDF File", command=self.select_pdf,
+                                      bg="#2563eb", fg="white", font=("Inter", 12, "bold"), padx=20, pady=10, relief="raised", bd=0, activebackground="#1e40af", activeforeground="white", cursor="hand2")
+        self.select_button.pack(pady=(0, 15))
+        self.select_button.bind("<Enter>", lambda e: self.select_button.config(relief="ridge"))
+        self.select_button.bind("<Leave>", lambda e: self.select_button.config(relief="raised"))
+
+        self.file_label = tk.Label(self, text="No PDF selected.", font=("Inter", 10), bg="#f3f4f6", fg="#6b7280", wraplength=550)
+        self.file_label.pack(pady=(0, 20))
+
+        self.convert_button_frame = tk.Frame(self, bg="#f3f4f6")
+        self.convert_button_frame.pack(pady=(0, 20))
+
+        self.convert_excel_button = tk.Button(self.convert_button_frame, text="Convert to Excel (XLSX)", command=lambda: self.convert_pdf_to_structured(file_type="xlsx"),
+                                              bg="#10b981", fg="white", font=("Inter", 10, "bold"), padx=15, pady=8, relief="raised", bd=0, activebackground="#047857", activeforeground="white", cursor="hand2", state=tk.DISABLED)
+        self.convert_excel_button.pack(side="left", padx=5)
+
+        self.convert_csv_button = tk.Button(self.convert_button_frame, text="Convert to CSV", command=lambda: self.convert_pdf_to_structured(file_type="csv"),
+                                             bg="#10b981", fg="white", font=("Inter", 10, "bold"), padx=15, pady=8, relief="raised", bd=0, activebackground="#047857", activeforeground="white", cursor="hand2", state=tk.DISABLED)
+        self.convert_csv_button.pack(side="left", padx=5)
+
+    def select_pdf(self):
+        self.update_status("")
+        file_path = filedialog.askopenfilename(title="Select PDF File", filetypes=[("PDF Files", "*.pdf")])
+        if file_path:
+            self.pdf_path = file_path
+            self.file_label.config(text=f"Selected PDF: {os.path.basename(self.pdf_path)}")
+            self.convert_excel_button.config(state=tk.NORMAL)
+            self.convert_csv_button.config(state=tk.NORMAL)
+            self.update_status("PDF selected. Ready to convert to Excel/CSV.")
+        else:
+            self.pdf_path = None
+            self.file_label.config(text="No PDF selected.")
+            self.convert_excel_button.config(state=tk.DISABLED)
+            self.convert_csv_button.config(state=tk.DISABLED)
+            self.update_status("No PDF selected.")
+
+    def convert_pdf_to_structured(self, file_type):
+        if not self.pdf_path:
+            messagebox.showwarning("No PDF", "Please select a PDF file first.")
+            return
+
+        self.update_status(f"Extracting text from PDF for {file_type.upper()} conversion...")
+        self.convert_excel_button.config(state=tk.DISABLED)
+        self.convert_csv_button.config(state=tk.DISABLED)
+        self.select_button.config(state=tk.DISABLED)
+
+        extracted_text = ""
+        try:
+            with open(self.pdf_path, 'rb') as file:
+                reader = PdfReader(file)
+                for page in reader.pages:
+                    extracted_text += page.extract_text() + "\n"
+        except Exception as e:
+            messagebox.showerror("Extraction Error", f"Error extracting text from PDF: {e}")
+            self.update_status(f"Error extracting text: {e}")
+            self.convert_excel_button.config(state=tk.NORMAL)
+            self.convert_csv_button.config(state=tk.NORMAL)
+            self.select_button.config(state=tk.NORMAL)
+            return
+
+        if not extracted_text.strip():
+            messagebox.showwarning("No Text Found", "No selectable text was found in the PDF. Conversion to Excel/CSV might result in an empty file.")
+            self.update_status("No text found in PDF for conversion.")
+            # Still proceed to save an empty file if the user wishes
+            pass
+
+        initial_file_name = os.path.splitext(os.path.basename(self.pdf_path))[0]
+        if file_type == "xlsx":
+            save_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx")], title="Save Excel File As", initialfile=f"{initial_file_name}.xlsx")
+        else: # csv
+            save_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")], title="Save CSV File As", initialfile=f"{initial_file_name}.csv")
+
+        if not save_path:
+            self.update_status(f"{file_type.upper()} conversion cancelled.")
+            self.convert_excel_button.config(state=tk.NORMAL)
+            self.convert_csv_button.config(state=tk.NORMAL)
+            self.select_button.config(state=tk.NORMAL)
+            return
+
+        try:
+            # For simplicity, we'll put the entire extracted text into one column.
+            # More advanced parsing (e.g., regex, table detection) would be needed
+            # for structured data extraction from arbitrary PDFs.
+            df = pd.DataFrame([line.strip() for line in extracted_text.splitlines() if line.strip()], columns=["Extracted Text"])
+
+            if file_type == "xlsx":
+                df.to_excel(save_path, index=False)
+            else: # csv
+                df.to_csv(save_path, index=False, encoding='utf-8')
+
+            messagebox.showinfo("Conversion Complete", f"{file_type.upper()} file created successfully at:\n{save_path}")
+            self.update_status(f"PDF text converted to {file_type.upper()} successfully!")
+        except Exception as e:
+            messagebox.showerror("Conversion Error", f"An error occurred during {file_type.upper()} creation: {e}")
+            self.update_status(f"Error: {e}")
+        finally:
+            self.convert_excel_button.config(state=tk.NORMAL)
+            self.convert_csv_button.config(state=tk.NORMAL)
+            self.select_button.config(state=tk.NORMAL)
+
+# --- Page 5: Text File to Excel/CSV Converter (New) ---
+class TextToExcelCsvPage(BasePage):
+    def __init__(self, parent, controller):
+        super().__init__(parent, controller)
+        self.text_file_path = None
+
+        tk.Label(self, text="Text File to Excel/CSV", font=("Inter", 20, "bold"), bg="#f3f4f6", fg="#1f2937").pack(pady=(10, 10))
+        tk.Label(self, text="Convert a plain text (.txt) file into an Excel (.xlsx) or CSV (.csv) file.", font=("Inter", 10), bg="#f3f4f6", fg="#4b5563").pack(pady=(0, 15))
+
+        self.select_button = tk.Button(self, text="Select Text File", command=self.select_text_file,
+                                      bg="#2563eb", fg="white", font=("Inter", 12, "bold"), padx=20, pady=10, relief="raised", bd=0, activebackground="#1e40af", activeforeground="white", cursor="hand2")
+        self.select_button.pack(pady=(0, 15))
+        self.select_button.bind("<Enter>", lambda e: self.select_button.config(relief="ridge"))
+        self.select_button.bind("<Leave>", lambda e: self.select_button.config(relief="raised"))
+
+        self.file_label = tk.Label(self, text="No text file selected.", font=("Inter", 10), bg="#f3f4f6", fg="#6b7280", wraplength=550)
+        self.file_label.pack(pady=(0, 20))
+
+        self.convert_button_frame = tk.Frame(self, bg="#f3f4f6")
+        self.convert_button_frame.pack(pady=(0, 20))
+
+        self.convert_excel_button = tk.Button(self.convert_button_frame, text="Convert to Excel (XLSX)", command=lambda: self.convert_text_to_structured(file_type="xlsx"),
+                                              bg="#10b981", fg="white", font=("Inter", 10, "bold"), padx=15, pady=8, relief="raised", bd=0, activebackground="#047857", activeforeground="white", cursor="hand2", state=tk.DISABLED)
+        self.convert_excel_button.pack(side="left", padx=5)
+
+        self.convert_csv_button = tk.Button(self.convert_button_frame, text="Convert to CSV", command=lambda: self.convert_text_to_structured(file_type="csv"),
+                                             bg="#10b981", fg="white", font=("Inter", 10, "bold"), padx=15, pady=8, relief="raised", bd=0, activebackground="#047857", activeforeground="white", cursor="hand2", state=tk.DISABLED)
+        self.convert_csv_button.pack(side="left", padx=5)
+
+    def select_text_file(self):
+        self.update_status("")
+        file_path = filedialog.askopenfilename(title="Select Text File", filetypes=[("Text Files", "*.txt")])
+        if file_path:
+            self.text_file_path = file_path
+            self.file_label.config(text=f"Selected Text File: {os.path.basename(self.text_file_path)}")
+            self.convert_excel_button.config(state=tk.NORMAL)
+            self.convert_csv_button.config(state=tk.NORMAL)
+            self.update_status("Text file selected. Ready to convert.")
+        else:
+            self.text_file_path = None
+            self.file_label.config(text="No text file selected.")
+            self.convert_excel_button.config(state=tk.DISABLED)
+            self.convert_csv_button.config(state=tk.DISABLED)
+            self.update_status("No text file selected.")
+
+    def convert_text_to_structured(self, file_type):
+        if not self.text_file_path:
+            messagebox.showwarning("No Text File", "Please select a text file first.")
+            return
+
+        try:
+            with open(self.text_file_path, 'r', encoding='utf-8') as f:
+                file_content = f.read()
+        except Exception as e:
+            messagebox.showerror("File Read Error", f"Could not read text file: {e}")
+            self.update_status(f"Error reading file: {e}")
+            return
+
+        if not file_content.strip():
+            messagebox.showwarning("Empty File", "The selected text file is empty or contains only whitespace.")
+            self.update_status("Text file is empty.")
+            return # Don't proceed with conversion for empty files
+
+        self.update_status(f"Converting text file to {file_type.upper()}...")
+        self.convert_excel_button.config(state=tk.DISABLED)
+        self.convert_csv_button.config(state=tk.DISABLED)
+        self.select_button.config(state=tk.DISABLED)
+
+        initial_file_name = os.path.splitext(os.path.basename(self.text_file_path))[0]
+        if file_type == "xlsx":
+            save_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx")], title="Save Excel File As", initialfile=f"{initial_file_name}.xlsx")
+        else: # csv
+            save_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")], title="Save CSV File As", initialfile=f"{initial_file_name}.csv")
+
+        if not save_path:
+            self.update_status(f"{file_type.upper()} conversion cancelled.")
+            self.convert_excel_button.config(state=tk.NORMAL)
+            self.convert_csv_button.config(state=tk.NORMAL)
+            self.select_button.config(state=tk.NORMAL)
+            return
+
+        try:
+            # Assuming comma-separated values for direct DataFrame creation
+            # You might need more robust parsing here depending on text file structure
+            from io import StringIO
+            data = StringIO(file_content)
+            df = pd.read_csv(data) # Tries to read as CSV by default
+
+            if file_type == "xlsx":
+                df.to_excel(save_path, index=False)
+            else: # csv
+                df.to_csv(save_path, index=False, encoding='utf-8')
+
+            messagebox.showinfo("Conversion Complete", f"{file_type.upper()} file created successfully at:\n{save_path}")
+            self.update_status(f"Text file converted to {file_type.upper()} successfully!")
+        except pd.errors.EmptyDataError:
+            messagebox.showwarning("Empty Data", "The text file appears to have no data to convert to a structured format.")
+            self.update_status("Empty data in text file.")
+        except Exception as e:
+            messagebox.showerror("Conversion Error", f"An error occurred during {file_type.upper()} creation: {e}\n\nHint: For text files, ensure data is properly delimited (e.g., comma-separated) for best results.")
+            self.update_status(f"Error: {e}")
+        finally:
+            self.convert_excel_button.config(state=tk.NORMAL)
+            self.convert_csv_button.config(state=tk.NORMAL)
+            self.select_button.config(state=tk.NORMAL)
 
 # --- Main Application Class ---
 class App(tk.Tk):
@@ -347,7 +563,8 @@ class App(tk.Tk):
 
         self.frames = {}
         # List of pages to include
-        for F in (ImageToSearchablePdfPage, PdfToTextPage, TextFileToPdfPage):
+        for F in (ImageToSearchablePdfPage, PdfToTextPage, TextFileToPdfPage, PdfToExcelCsvPage, TextToExcelCsvPage):
+            page_name = F.__name__
             page_name = F.__name__
             frame = F(parent=container, controller=self)
             self.frames[page_name] = frame
@@ -371,6 +588,11 @@ class App(tk.Tk):
                   font=btn_font, bg=btn_bg, fg=btn_fg, activebackground=btn_active_bg, activeforeground=btn_fg, relief="flat").pack(side="left", padx=5, pady=5, expand=True, fill="x")
         tk.Button(nav_frame, text="Text File to PDF", command=lambda: self.show_frame("TextFileToPdfPage"),
                   font=btn_font, bg=btn_bg, fg=btn_fg, activebackground=btn_active_bg, activeforeground=btn_fg, relief="flat").pack(side="left", padx=5, pady=5, expand=True, fill="x")
+        tk.Button(nav_frame, text="PDF to Excel/CSV", command=lambda: self.show_frame("PdfToExcelCsvPage"),
+                  font=btn_font, bg=btn_bg, fg=btn_fg, activebackground=btn_active_bg, activeforeground=btn_fg, relief="flat").pack(side="left", padx=5, pady=5, expand=True, fill="x")
+        tk.Button(nav_frame, text="Text to Excel/CSV", command=lambda: self.show_frame("TextToExcelCsvPage"),
+                  font=btn_font, bg=btn_bg, fg=btn_fg, activebackground=btn_active_bg, activeforeground=btn_fg, relief="flat").pack(side="left", padx=5, pady=5, expand=True, fill="x")
+
 
     def show_frame(self, page_name):
         frame = self.frames[page_name]
